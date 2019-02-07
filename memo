@@ -1,0 +1,5 @@
+go mod vendor
+
+go fmt ./...&&go test ./... -v -mod=vendor
+
+go fmt ./...&&go run -v -mod=vendor main/xxx.go

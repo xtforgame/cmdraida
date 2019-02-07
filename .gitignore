@@ -1,0 +1,5 @@
+**/*.7z
+/build
+/tmp
+/vendor
+.DS_Store
