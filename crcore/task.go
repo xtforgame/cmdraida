@@ -8,8 +8,6 @@ import (
 	"io"
 	"os/exec"
 	// "path/filepath"
-	"io/ioutil"
-	"strconv"
 	"syscall"
 	"time"
 )
@@ -47,6 +45,10 @@ type ResultLog struct {
 	IsTerminatedByTimeout bool            `json:"terminated-by-timeout,"`
 	Output                string          `json:"output,"`
 	JsonOutput            json.RawMessage `json:"json-output,omitempty"`
+	Stdout                string          `json:"stdout,"`
+	JsonStdout            json.RawMessage `json:"json-stdout,omitempty"`
+	Stderr                string          `json:"stderr,"`
+	JsonStderr            json.RawMessage `json:"json-stderr,omitempty"`
 }
 
 func (resultLog *ResultLog) ToJson() ([]byte, error) {
@@ -76,7 +78,7 @@ type FinalStatus struct {
 }
 
 type TaskBase struct {
-	Reporter
+	Reporter      Reporter
 	command       *CommandType
 	manager       *TaskManager
 	cmd           *exec.Cmd
@@ -104,18 +106,9 @@ func (t TaskSlice) Swap(i, j int) {
 func NewFinishedTaskBase(manager *TaskManager, number uint64, basePath string) *TaskBase {
 	task := &TaskBase{
 		manager:  manager,
-		Reporter: NewReporter(number, basePath),
+		Reporter: manager.CreateReporter(number, basePath),
 	}
-	var resultLog *ResultLog
-	bytes, err := ioutil.ReadFile(GetLogPath(task.path, "result"))
-	if err == nil {
-		resultLog = &ResultLog{}
-		err = json.Unmarshal(bytes, resultLog)
-		if err != nil {
-			resultLog = nil
-		}
-		task.resultLog = resultLog
-	}
+	task.resultLog, _ = task.Reporter.ReadFinishedResultLog()
 	return task
 }
 
@@ -130,56 +123,17 @@ func NewTaskBase(manager *TaskManager, number uint64, basePath string, commandTy
 
 	return &TaskBase{
 		manager:  manager,
-		Reporter: NewReporter(number, basePath),
+		Reporter: manager.CreateReporter(number, basePath),
 		command:  &commandType,
 	}
 }
 
 func (taskA *TaskBase) IsLessThan(taskB *TaskBase) bool {
-	return taskA.number < taskB.number
-}
-
-func (task *TaskBase) reportResult(resultOutput io.Writer, finalStatus *FinalStatus) {
-	task.resultLog = &ResultLog{}
-	task.resultLog.TaskNumber = task.number
-	if finalStatus.Error != nil {
-		task.resultLog.Error = fmt.Sprintf("%s", finalStatus.Error)
-	}
-
-	task.resultLog.IsKilledByCommand = finalStatus.IsKilledByCommand
-	task.resultLog.IsKilledByTimeout = finalStatus.IsKilledByTimeout
-	task.resultLog.IsTerminatedByTimeout = finalStatus.IsTerminatedByTimeout
-
-	task.resultLog.Command = &finalStatus.CommandType
-	outputBytes := finalStatus.Task.GetFullOutput()
-	task.resultLog.Output = string(outputBytes)
-	if task.resultLog.Command.ExpectJsonResult {
-		err := json.Unmarshal(outputBytes, &task.resultLog.JsonOutput)
-		if err == nil {
-			task.resultLog.Output = ""
-		}
-	}
-
-	if finalStatus.Signaled {
-		sigVal, _ := strconv.ParseInt(fmt.Sprintf("%d", finalStatus.Signal), 10, 64)
-		task.resultLog.Signal = &SignalType{
-			Name:  finalStatus.Signal.String(),
-			Value: sigVal,
-		}
-	}
-
-	if finalStatus.IsExitStatusValid {
-		task.resultLog.ExitStatus = &ExitStatusType{
-			Value: finalStatus.ExitStatus,
-		}
-	}
-	finalStatus.Task = task
-	b, _ := task.resultLog.ToJson()
-	resultOutput.Write(b)
+	return taskA.Reporter.GetNumber() < taskB.Reporter.GetNumber()
 }
 
 // https://github.com/golang/go/issues/7938
-func (task *TaskBase) Exec(stdout, stderr, resultOutput io.Writer) *FinalStatus {
+func (task *TaskBase) Exec(stdout, stderr, resultOutput Writer) *FinalStatus {
 	var fStatus = FinalStatus{}
 	// cmd := exec.Command("./azpbrctl")
 	if task.command.Args != nil {
@@ -230,7 +184,7 @@ func (task *TaskBase) Exec(stdout, stderr, resultOutput io.Writer) *FinalStatus 
 
 	fStatus.CommandType = *task.command
 	fStatus.Task = task
-	task.reportResult(resultOutput, &fStatus)
+	task.resultLog, _ = task.Reporter.ProduceResultLog(resultOutput, &fStatus)
 	return &fStatus
 }
 
@@ -270,15 +224,15 @@ func (task *TaskBase) ExecOld(command string, args []string, stdout, stderr io.W
 }
 
 func (task *TaskBase) Run() (*FinalStatus, error) {
-	outWriter, err := task.GetStdoutWriter()
+	outWriter, err := task.Reporter.GetStdoutWriter()
 	if err != nil {
 		return nil, err
 	}
-	errWriter, err := task.GetStderrWriter()
+	errWriter, err := task.Reporter.GetStderrWriter()
 	if err != nil {
 		return nil, err
 	}
-	resultWriter, err := task.GetResultWriter()
+	resultWriter, err := task.Reporter.GetResultWriter()
 	if err != nil {
 		return nil, err
 	}

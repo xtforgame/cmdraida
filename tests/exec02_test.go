@@ -6,16 +6,20 @@ import (
 	// "bufio"
 	// "github.com/xtforgame/cmdraida"
 	"github.com/xtforgame/cmdraida/crcore"
+	"github.com/xtforgame/cmdraida/t1"
 	// "io"
 	"os"
 )
 
 var exec02TestFolder = "../tmp/test/exec02"
-var exec02TestFile = exec02TestFolder + "/x.x"
 
 func TestExec02Run01(t *testing.T) {
 	os.RemoveAll(exec02TestFolder)
 	os.MkdirAll(exec02TestFolder, os.ModePerm)
 
-	crcore.NewTaskManager(exec02TestFolder)
+	manager := crcore.NewTaskManager(exec02TestFolder, t1.NewReporterT1)
+	manager.Init()
+	manager.TestNewTask()
+
+	defer manager.Close()
 }

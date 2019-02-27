@@ -16,12 +16,15 @@ type CommandWithCallback struct {
 	callback func(result interface{})
 }
 
+type ReporterCreator func(number uint64, basePath string) Reporter
+
 type TaskManager struct {
 	rootFolder     string
 	taskMap        map[string]*TaskBase
 	maxLogNumber   uint64
 	cmdQueue       chan CommandWithCallback
 	waitWorkerStop chan bool
+	CreateReporter ReporterCreator
 }
 
 func (taskManager *TaskManager) runTask(commandType CommandType) *TaskBase {
@@ -36,7 +39,7 @@ func (taskManager *TaskManager) runTask(commandType CommandType) *TaskBase {
 		}
 		task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, commandType)
 
-		_, err = task.GetStdoutWriter()
+		_, err = task.Reporter.GetStdoutWriter()
 		if err != nil {
 			task = nil
 		}
@@ -86,11 +89,12 @@ func (taskManager *TaskManager) TaskMap() map[string]*TaskBase {
 	return taskManager.taskMap
 }
 
-func NewTaskManager(rootFolder string) *TaskManager {
+func NewTaskManager(rootFolder string, createReporter ReporterCreator) *TaskManager {
 	return &TaskManager{
-		rootFolder: rootFolder,
-		taskMap:    map[string]*TaskBase{},
-		cmdQueue:   make(chan CommandWithCallback, 3),
+		rootFolder:     rootFolder,
+		taskMap:        map[string]*TaskBase{},
+		cmdQueue:       make(chan CommandWithCallback, 3),
+		CreateReporter: createReporter,
 	}
 }
 
@@ -138,14 +142,14 @@ func (taskManager *TaskManager) TestNewTask() *TaskBase {
 		if retry > 10 {
 			return nil
 		}
-		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
-		// 	Command: "bash",
-		// 	Args: []string{"-c", "echo xxx;sleep 2;echo ooo"},
-		// 	Timeouts: TimeoutsType{
-		// 		Proccess: 1000,
-		// 		AfterKilled: 1500,
-		// 	},
-		// })
+		task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
+			Command: "bash",
+			Args:    []string{"-c", "echo xxx;sleep 2;echo ooo"},
+			Timeouts: TimeoutsType{
+				Proccess:    1000,
+				AfterKilled: 1500,
+			},
+		})
 		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
 		// 	Command: "bash",
 		// 	Args: []string{"-c", "echo xxx;sleep 2;echo ooo"},
@@ -186,7 +190,7 @@ func (taskManager *TaskManager) TestNewTask() *TaskBase {
 		// 	},
 		// })
 
-		_, err = task.GetStdoutWriter()
+		_, err = task.Reporter.GetStdoutWriter()
 		if err != nil {
 			task = nil
 		}
