@@ -5,7 +5,8 @@ import (
 	// "errors"
 	// "bufio"
 	// "github.com/xtforgame/cmdraida"
-	"github.com/xtforgame/cmdraida/crcore"
+	// "github.com/xtforgame/cmdraida/crcore"
+	"github.com/xtforgame/cmdraida/crbasic"
 	"github.com/xtforgame/cmdraida/t1"
 	// "io"
 	"os"
@@ -17,7 +18,7 @@ func TestExec02Run01(t *testing.T) {
 	os.RemoveAll(exec02TestFolder)
 	os.MkdirAll(exec02TestFolder, os.ModePerm)
 
-	manager := crcore.NewTaskManager(exec02TestFolder, t1.NewReporterT1)
+	manager := crbasic.NewTaskManager(exec02TestFolder, t1.NewReporterT1)
 	manager.Init()
 	manager.TestNewTask()
 

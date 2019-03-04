@@ -1,9 +1,10 @@
-package crcore
+package crbasic
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/xtforgame/cmdraida/crcore"
 	"io/ioutil"
 	"sort"
 	"strconv"
@@ -11,23 +12,24 @@ import (
 	"time"
 )
 
-type CommandWithCallback struct {
-	CommandType
-	callback func(result interface{})
+type TaskManagerBase struct {
+	basePath        string
+	taskMap         map[string]*TaskBase
+	maxLogNumber    uint64
+	cmdQueue        chan crcore.CommandWithCallback
+	waitWorkerStop  chan bool
+	ReporterCreator crcore.ReporterCreator
 }
 
-type ReporterCreator func(number uint64, basePath string) Reporter
-
-type TaskManager struct {
-	rootFolder     string
-	taskMap        map[string]*TaskBase
-	maxLogNumber   uint64
-	cmdQueue       chan CommandWithCallback
-	waitWorkerStop chan bool
-	CreateReporter ReporterCreator
+func (taskManager *TaskManagerBase) GetBasePath() string {
+	return taskManager.basePath
 }
 
-func (taskManager *TaskManager) runTask(commandType CommandType) *TaskBase {
+func (taskManager *TaskManagerBase) CreateReporter(taskUid string, options *crcore.ReporterOptions) crcore.Reporter {
+	return taskManager.ReporterCreator(taskUid, options)
+}
+
+func (taskManager *TaskManagerBase) RunTask(commandType crcore.CommandType) *TaskBase {
 	var task *TaskBase
 	var err error
 	var retry int
@@ -37,7 +39,7 @@ func (taskManager *TaskManager) runTask(commandType CommandType) *TaskBase {
 		if retry > 10 {
 			return nil
 		}
-		task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, commandType)
+		task = NewTaskBase(taskManager, fmt.Sprintf("%08d", taskManager.maxLogNumber), commandType)
 
 		_, err = task.Reporter.GetStdoutWriter()
 		if err != nil {
@@ -48,29 +50,29 @@ func (taskManager *TaskManager) runTask(commandType CommandType) *TaskBase {
 	return task
 }
 
-func (taskManager *TaskManager) startWorker() {
+func (taskManager *TaskManagerBase) startWorker() {
 	taskManager.waitWorkerStop = make(chan bool)
 	go func() {
 		fmt.Println("worker started")
 		for command := range taskManager.cmdQueue {
 			fmt.Println("command :", command)
-			if command.isTerminalCmd {
+			if command.IsTerminalCmd {
 				break
 			}
 			cancel := make(chan interface{}, 1)
-			CancelableAsync(func() interface{} {
-				return taskManager.runTask(command.CommandType)
-			}, command.callback, cancel)
+			crcore.CancelableAsync(func() interface{} {
+				return taskManager.RunTask(command.CommandType)
+			}, command.Callback, cancel)
 		}
 		fmt.Println("worker finished")
 		taskManager.waitWorkerStop <- true
 	}()
 }
 
-func (taskManager *TaskManager) finishWorker() {
-	taskManager.cmdQueue <- CommandWithCallback{
-		CommandType: CommandType{
-			isTerminalCmd: true,
+func (taskManager *TaskManagerBase) finishWorker() {
+	taskManager.cmdQueue <- crcore.CommandWithCallback{
+		CommandType: crcore.CommandType{
+			IsTerminalCmd: true,
 		},
 	}
 	select {
@@ -85,21 +87,21 @@ func (taskManager *TaskManager) finishWorker() {
 	}
 }
 
-func (taskManager *TaskManager) TaskMap() map[string]*TaskBase {
+func (taskManager *TaskManagerBase) TaskMap() map[string]*TaskBase {
 	return taskManager.taskMap
 }
 
-func NewTaskManager(rootFolder string, createReporter ReporterCreator) *TaskManager {
-	return &TaskManager{
-		rootFolder:     rootFolder,
-		taskMap:        map[string]*TaskBase{},
-		cmdQueue:       make(chan CommandWithCallback, 3),
-		CreateReporter: createReporter,
+func NewTaskManager(basePath string, ReporterCreator crcore.ReporterCreator) *TaskManagerBase {
+	return &TaskManagerBase{
+		basePath:        basePath,
+		taskMap:         map[string]*TaskBase{},
+		cmdQueue:        make(chan crcore.CommandWithCallback, 3),
+		ReporterCreator: ReporterCreator,
 	}
 }
 
-func (taskManager *TaskManager) Init() {
-	fileInfos, err := ioutil.ReadDir(taskManager.rootFolder)
+func (taskManager *TaskManagerBase) Init() {
+	fileInfos, err := ioutil.ReadDir(taskManager.basePath)
 	if err != nil {
 		panic(err)
 	}
@@ -110,7 +112,7 @@ func (taskManager *TaskManager) Init() {
 		if len(parts) == 2 && parts[0] == "log" {
 			logNumber, err := strconv.ParseUint(parts[1], 10, 64)
 			if err == nil {
-				taskManager.taskMap[parts[1]] = NewFinishedTaskBase(taskManager, logNumber, taskManager.rootFolder)
+				taskManager.taskMap[parts[1]] = NewFinishedTaskBase(taskManager, fmt.Sprintf("%08d", logNumber))
 				if taskManager.maxLogNumber < logNumber {
 					taskManager.maxLogNumber = logNumber
 				}
@@ -121,7 +123,7 @@ func (taskManager *TaskManager) Init() {
 	taskManager.startWorker()
 }
 
-func (taskManager *TaskManager) Close() {
+func (taskManager *TaskManagerBase) Close() {
 	for _, logData := range taskManager.taskMap {
 		logData.Close()
 	}
@@ -132,7 +134,7 @@ func (taskManager *TaskManager) Close() {
 	// }
 }
 
-func (taskManager *TaskManager) TestNewTask() *TaskBase {
+func (taskManager *TaskManagerBase) TestNewTask() *TaskBase {
 	var task *TaskBase
 	var err error
 	var retry int
@@ -142,15 +144,15 @@ func (taskManager *TaskManager) TestNewTask() *TaskBase {
 		if retry > 10 {
 			return nil
 		}
-		task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
+		task = NewTaskBase(taskManager, fmt.Sprintf("%08d", taskManager.maxLogNumber), crcore.CommandType{
 			Command: "bash",
 			Args:    []string{"-c", "echo xxx;sleep 2;echo ooo"},
-			Timeouts: TimeoutsType{
+			Timeouts: crcore.TimeoutsType{
 				Proccess:    1000,
 				AfterKilled: 1500,
 			},
 		})
-		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
+		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.basePath, CommandType{
 		// 	Command: "bash",
 		// 	Args: []string{"-c", "echo xxx;sleep 2;echo ooo"},
 		// 	Timeouts: TimeoutsType{
@@ -158,16 +160,16 @@ func (taskManager *TaskManager) TestNewTask() *TaskBase {
 		// 		AfterKilled: 500,
 		// 	},
 		// })
-		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
+		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.basePath, CommandType{
 		// 	Command: "azpbrctl",
 		// 	Args: []string{"-h"},
 		// })
-		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
+		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.basePath, CommandType{
 		// 	Command: "restic",
 		// 	Args: []string{"-h"},
 		// })
 
-		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
+		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.basePath, CommandType{
 		// 	Command: taskManager.cliHelper.CmdAzprbctl(),
 		// 	Args: []string{
 		// 		"-m",
@@ -180,7 +182,7 @@ func (taskManager *TaskManager) TestNewTask() *TaskBase {
 		// 	},
 		// })
 
-		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.rootFolder, CommandType{
+		// task = NewTaskBase(taskManager, taskManager.maxLogNumber, taskManager.basePath, CommandType{
 		// 	Command: taskManager.cliHelper.CmdRestic(),
 		// 	Args: []string{
 		// 		"restore",
@@ -199,14 +201,14 @@ func (taskManager *TaskManager) TestNewTask() *TaskBase {
 	return task
 }
 
-func (taskManager *TaskManager) AddTask(command CommandType, callback func(interface{})) {
-	taskManager.cmdQueue <- CommandWithCallback{
+func (taskManager *TaskManagerBase) AddTask(command crcore.CommandType, callback func(interface{})) {
+	taskManager.cmdQueue <- crcore.CommandWithCallback{
 		CommandType: command,
-		callback:    callback,
+		Callback:    callback,
 	}
 }
 
-func ResultLogsToJson(resultLogs []*ResultLog) ([]byte, error) {
+func ResultLogsToJson(resultLogs []*crcore.ResultLog) ([]byte, error) {
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
@@ -218,7 +220,7 @@ func ResultLogsToJson(resultLogs []*ResultLog) ([]byte, error) {
 	// return json.Marshal(resultLogs)
 }
 
-func (taskManager *TaskManager) GetTaskListJson() ([]byte, error) {
+func (taskManager *TaskManagerBase) GetTaskListJson() ([]byte, error) {
 	taskMap := taskManager.TaskMap()
 	tasks := TaskSlice{}
 	for _, v := range taskMap {
@@ -226,7 +228,7 @@ func (taskManager *TaskManager) GetTaskListJson() ([]byte, error) {
 	}
 	sort.Sort(tasks)
 
-	results := []*ResultLog{}
+	results := []*crcore.ResultLog{}
 	for _, task := range tasks {
 		results = append(results, task.ResultLog())
 

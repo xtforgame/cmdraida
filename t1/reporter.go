@@ -13,33 +13,43 @@ import (
 )
 
 type ReporterT1 struct {
-	number       uint64
-	path         string
-	stdoutWriter crcore.Writer
-	stderrWriter crcore.Writer
-	resultWriter crcore.Writer
+	path            string
+	taskUid         string
+	reporterOptions *crcore.ReporterOptions
+	stdoutWriter    crcore.Writer
+	stderrWriter    crcore.Writer
+	resultWriter    crcore.Writer
 }
 
-func NewReporterT1(number uint64, basePath string) crcore.Reporter {
-	path := filepath.Join(basePath, "log_"+fmt.Sprintf("%08d", number))
+func NewReporterT1(taskUid string, options *crcore.ReporterOptions) crcore.Reporter {
+	path := filepath.Join(options.BasePath, taskUid)
 	reporter := &ReporterT1{
-		number: number,
-		path:   path,
+		path:            path,
+		taskUid:         taskUid,
+		reporterOptions: options,
 	}
 	os.MkdirAll(path, os.ModePerm)
 
-	reporter.stdoutWriter, _ = NewLogWriter("stdout", reporter)
-	reporter.stderrWriter, _ = NewLogWriter("stderr", reporter)
-	reporter.resultWriter, _ = NewLogWriter("result", reporter)
+	var err error
+
+	if reporter.stdoutWriter, err = NewLogWriter("stdout", reporter); err != nil {
+		return nil
+	}
+	if reporter.stderrWriter, err = NewLogWriter("stderr", reporter); err != nil {
+		return nil
+	}
+	if reporter.resultWriter, err = NewLogWriter("result", reporter); err != nil {
+		return nil
+	}
 	return reporter
 }
 
-func (reporter *ReporterT1) GetNumber() uint64 {
-	return reporter.number
+func (reporter *ReporterT1) GetTaskUid() string {
+	return reporter.taskUid
 }
 
-func (reporter *ReporterT1) GetPath() string {
-	return reporter.path
+func (reporter *ReporterT1) GetReporterOptions() *crcore.ReporterOptions {
+	return reporter.reporterOptions
 }
 
 func (reporter *ReporterT1) GetStdoutWriter() (crcore.Writer, error) {
@@ -56,7 +66,7 @@ func (reporter *ReporterT1) GetResultWriter() (crcore.Writer, error) {
 
 func (reporter *ReporterT1) ProduceResultLog(resultOutput crcore.Writer, finalStatus *crcore.FinalStatus) (*crcore.ResultLog, error) {
 	resultLog := &crcore.ResultLog{}
-	resultLog.TaskNumber = reporter.GetNumber()
+	resultLog.TaskUid = reporter.GetTaskUid()
 	if finalStatus.Error != nil {
 		resultLog.Error = fmt.Sprintf("%s", finalStatus.Error)
 	}
@@ -95,7 +105,7 @@ func (reporter *ReporterT1) ProduceResultLog(resultOutput crcore.Writer, finalSt
 
 func (reporter *ReporterT1) ReadFinishedResultLog() (*crcore.ResultLog, error) {
 	var resultLog *crcore.ResultLog
-	bytes, err := ioutil.ReadFile(GetLogPath(reporter.GetPath(), "result"))
+	bytes, err := ioutil.ReadFile(GetLogPath(filepath.Join(reporter.GetReporterOptions().BasePath, reporter.GetTaskUid()), "result"))
 	if err == nil {
 		resultLog = &crcore.ResultLog{}
 		err = json.Unmarshal(bytes, resultLog)

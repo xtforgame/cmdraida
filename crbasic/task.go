@@ -1,93 +1,28 @@
-package crcore
+package crbasic
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	// "path/filepath"
+	"github.com/xtforgame/cmdraida/crcore"
 	"syscall"
 	"time"
 )
 
-type TimeoutsType struct {
-	Proccess    uint64 `json:"proccess,"`
-	AfterKilled uint64 `json:"after-killed,"`
-}
-
-type CommandType struct {
-	Command          string       `json:"command,"`
-	Args             []string     `json:"args,"`
-	ExpectJsonResult bool         `json:"-"`
-	Timeouts         TimeoutsType `json:"timeouts,"`
-	isTerminalCmd    bool
-}
-
-type SignalType struct {
-	Value int64  `json:"value,"`
-	Name  string `json:"message,"`
-}
-
-type ExitStatusType struct {
-	Value int `json:"value,"`
-}
-
-type ResultLog struct {
-	TaskNumber            uint64          `json:"task,"`
-	Command               *CommandType    `json:"command,"`
-	Error                 string          `json:"error,"`
-	Signal                *SignalType     `json:"signal,"`
-	ExitStatus            *ExitStatusType `json:"exit-status,"`
-	IsKilledByCommand     bool            `json:"killed-by-command,"`
-	IsKilledByTimeout     bool            `json:"killed-by-timeout,"`
-	IsTerminatedByTimeout bool            `json:"terminated-by-timeout,"`
-	Output                string          `json:"output,"`
-	JsonOutput            json.RawMessage `json:"json-output,omitempty"`
-	Stdout                string          `json:"stdout,"`
-	JsonStdout            json.RawMessage `json:"json-stdout,omitempty"`
-	Stderr                string          `json:"stderr,"`
-	JsonStderr            json.RawMessage `json:"json-stderr,omitempty"`
-}
-
-func (resultLog *ResultLog) ToJson() ([]byte, error) {
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(resultLog); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-type FinalStatus struct {
-	CommandType
-	Task                  *TaskBase
-	Error                 error
-	WaitStatus            syscall.WaitStatus
-	IsWaitStatusValid     bool
-	ExitStatus            int
-	IsExitStatusValid     bool
-	Signaled              bool
-	Signal                syscall.Signal
-	IsKilledByCommand     bool
-	IsKilledByTimeout     bool
-	IsTerminatedByTimeout bool
-}
-
 type TaskBase struct {
-	Reporter      Reporter
-	command       *CommandType
-	manager       *TaskManager
+	Reporter      crcore.Reporter
+	TaskUid       string
+	command       *crcore.CommandType
+	manager       crcore.TaskManager
 	cmd           *exec.Cmd
-	cmdChan       chan FinalStatus
+	cmdChan       chan crcore.FinalStatus
 	terminateChan chan string
-	resultLog     *ResultLog
+	resultLog     *crcore.ResultLog
 }
 
-func (task *TaskBase) ResultLog() *ResultLog { return task.resultLog }
+func (task *TaskBase) ResultLog() *crcore.ResultLog { return task.resultLog }
 
 type TaskSlice []*TaskBase
 
@@ -103,16 +38,18 @@ func (t TaskSlice) Swap(i, j int) {
 	t[i], t[j] = t[j], t[i]
 }
 
-func NewFinishedTaskBase(manager *TaskManager, number uint64, basePath string) *TaskBase {
+func NewFinishedTaskBase(manager crcore.TaskManager, taskUid string) *TaskBase {
 	task := &TaskBase{
-		manager:  manager,
-		Reporter: manager.CreateReporter(number, basePath),
+		manager: manager,
+		Reporter: manager.CreateReporter(taskUid, &crcore.ReporterOptions{
+			BasePath: manager.GetBasePath(),
+		}),
 	}
 	task.resultLog, _ = task.Reporter.ReadFinishedResultLog()
 	return task
 }
 
-func NewTaskBase(manager *TaskManager, number uint64, basePath string, commandType CommandType) *TaskBase {
+func NewTaskBase(manager crcore.TaskManager, taskUid string, commandType crcore.CommandType) *TaskBase {
 	if commandType.Timeouts.Proccess == 0 {
 		commandType.Timeouts.Proccess = 24 * 60 * 60 * 1000
 	}
@@ -122,32 +59,40 @@ func NewTaskBase(manager *TaskManager, number uint64, basePath string, commandTy
 	}
 
 	return &TaskBase{
-		manager:  manager,
-		Reporter: manager.CreateReporter(number, basePath),
-		command:  &commandType,
+		manager: manager,
+		Reporter: manager.CreateReporter(taskUid, &crcore.ReporterOptions{
+			BasePath: manager.GetBasePath(),
+		}),
+		command: &commandType,
 	}
 }
 
 func (taskA *TaskBase) IsLessThan(taskB *TaskBase) bool {
-	return taskA.Reporter.GetNumber() < taskB.Reporter.GetNumber()
+	return taskA.Reporter.GetTaskUid() < taskB.Reporter.GetTaskUid()
 }
 
 // https://github.com/golang/go/issues/7938
-func (task *TaskBase) Exec(stdout, stderr, resultOutput Writer) *FinalStatus {
-	var fStatus = FinalStatus{}
+func (task *TaskBase) Exec(stdout, stderr, resultOutput crcore.Writer) *crcore.FinalStatus {
+	var fStatus = crcore.FinalStatus{}
 	// cmd := exec.Command("./azpbrctl")
 	if task.command.Args != nil {
 		task.cmd = exec.Command(task.command.Command, task.command.Args...)
 	} else {
 		task.cmd = exec.Command(task.command.Command)
 	}
+	if task.command.Env != nil {
+		task.cmd.Env = append(task.cmd.Env, task.command.Env...)
+	}
+	if task.command.Dir != "" {
+		task.cmd.Dir = task.command.Dir
+	}
 	task.cmd.Stdout = stdout
 	task.cmd.Stderr = stderr
-	task.cmdChan = make(chan FinalStatus)
+	task.cmdChan = make(chan crcore.FinalStatus)
 	task.terminateChan = make(chan string)
 	startErr := task.cmd.Start()
 	if startErr == nil {
-		go WaitFinalStatus(task.cmd, &task.cmdChan)
+		go crcore.WaitFinalStatus(task.cmd, &task.cmdChan)
 
 		select {
 		case reason := <-task.terminateChan:
@@ -223,7 +168,7 @@ func (task *TaskBase) ExecOld(command string, args []string, stdout, stderr io.W
 	return err
 }
 
-func (task *TaskBase) Run() (*FinalStatus, error) {
+func (task *TaskBase) Run() (*crcore.FinalStatus, error) {
 	outWriter, err := task.Reporter.GetStdoutWriter()
 	if err != nil {
 		return nil, err

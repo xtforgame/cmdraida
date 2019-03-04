@@ -5,6 +5,7 @@ import (
 	"github.com/xtforgame/cmdraida/crcore"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 type LogWriter struct {
@@ -22,7 +23,8 @@ func NewLogWriter(_type string, owner crcore.Reporter) (*LogWriter, error) {
 		buffer: bytes.Buffer{},
 	}
 
-	file, err := os.OpenFile(GetLogPath(owner.GetPath(), lw._type), os.O_WRONLY|os.O_CREATE|os.O_EXCL, os.ModePerm)
+	path := GetLogPath(filepath.Join(owner.GetReporterOptions().BasePath, owner.GetTaskUid()), lw._type)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
