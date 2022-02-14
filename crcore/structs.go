@@ -47,7 +47,8 @@ type FinalStatus struct {
 
 type CommandWithCallback struct {
 	CommandType
-	Callback func(result interface{})
+	OnTaskCreated func(task interface{})
+	Callback      func(result interface{})
 }
 
 type ReporterOptions struct {

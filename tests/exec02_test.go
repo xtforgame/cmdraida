@@ -21,6 +21,7 @@ func TestExec02Run01(t *testing.T) {
 	manager := crbasic.NewTaskManager(exec02TestFolder, t1.NewReporterT1)
 	manager.Init()
 	manager.TestNewTask()
+	manager.TestNewTask2()
 
 	defer manager.Close()
 }

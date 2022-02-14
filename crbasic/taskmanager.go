@@ -12,11 +12,17 @@ import (
 	"time"
 )
 
+type TaskWithCallback struct {
+	Task     *TaskBase
+	Callback func(result interface{})
+}
+
 type TaskManagerBase struct {
 	basePath        string
 	taskMap         map[string]*TaskBase
 	maxLogNumber    uint64
 	cmdQueue        chan crcore.CommandWithCallback
+	taskQueue       chan TaskWithCallback
 	waitWorkerStop  chan bool
 	ReporterCreator crcore.ReporterCreator
 }
@@ -29,7 +35,7 @@ func (taskManager *TaskManagerBase) CreateReporter(taskUid string, options *crco
 	return taskManager.ReporterCreator(taskUid, options)
 }
 
-func (taskManager *TaskManagerBase) RunTask(commandType crcore.CommandType) *TaskBase {
+func (taskManager *TaskManagerBase) createTask(commandType crcore.CommandType) *TaskBase {
 	var task *TaskBase
 	var err error
 	var retry int
@@ -46,23 +52,54 @@ func (taskManager *TaskManagerBase) RunTask(commandType crcore.CommandType) *Tas
 			task = nil
 		}
 	}
-	task.Run()
+	return task
+}
+
+func (taskManager *TaskManagerBase) RunTask(commandType crcore.CommandType) *TaskBase {
+	task := taskManager.createTask(commandType)
+	if task != nil {
+		task.Run()
+	}
 	return task
 }
 
 func (taskManager *TaskManagerBase) startWorker() {
 	taskManager.waitWorkerStop = make(chan bool)
+	stopped := false
 	go func() {
 		fmt.Println("worker started")
-		for command := range taskManager.cmdQueue {
-			fmt.Println("command :", command)
-			if command.IsTerminalCmd {
+		for {
+			select {
+			case command := <-taskManager.cmdQueue:
+				fmt.Println("command :", command)
+				if command.IsTerminalCmd {
+					stopped = true
+				}
+				cancel := make(chan interface{}, 1)
+				crcore.CancelableAsync(func() interface{} {
+					task := taskManager.createTask(command.CommandType)
+					command.OnTaskCreated(task)
+					if task != nil {
+						task.Run()
+					}
+					return task
+				}, command.Callback, cancel)
+			case taskData := <-taskManager.taskQueue:
+				fmt.Println("taskData :", taskData)
+				if taskData.Task.command.IsTerminalCmd {
+					stopped = true
+				}
+				cancel := make(chan interface{}, 1)
+				crcore.CancelableAsync(func() interface{} {
+					if taskData.Task != nil {
+						taskData.Task.Run()
+					}
+					return taskData
+				}, taskData.Callback, cancel)
+			}
+			if stopped {
 				break
 			}
-			cancel := make(chan interface{}, 1)
-			crcore.CancelableAsync(func() interface{} {
-				return taskManager.RunTask(command.CommandType)
-			}, command.Callback, cancel)
 		}
 		fmt.Println("worker finished")
 		taskManager.waitWorkerStop <- true
@@ -96,6 +133,7 @@ func NewTaskManager(basePath string, ReporterCreator crcore.ReporterCreator) *Ta
 		basePath:        basePath,
 		taskMap:         map[string]*TaskBase{},
 		cmdQueue:        make(chan crcore.CommandWithCallback, 3),
+		taskQueue:       make(chan TaskWithCallback, 3),
 		ReporterCreator: ReporterCreator,
 	}
 }
@@ -131,6 +169,10 @@ func (taskManager *TaskManagerBase) Close() {
 	// if taskManager.cmdQueue != nil {
 	// 	close(taskManager.cmdQueue)
 	// 	taskManager.cmdQueue = nil
+	// }
+	// if taskManager.taskQueue != nil {
+	// 	close(taskManager.taskQueue)
+	// 	taskManager.taskQueue = nil
 	// }
 }
 
@@ -201,11 +243,59 @@ func (taskManager *TaskManagerBase) TestNewTask() *TaskBase {
 	return task
 }
 
-func (taskManager *TaskManagerBase) AddTask(command crcore.CommandType, callback func(interface{})) {
+func (taskManager *TaskManagerBase) AddCommand(command crcore.CommandType, onTaskCreated func(*TaskBase), callback func(interface{})) {
 	taskManager.cmdQueue <- crcore.CommandWithCallback{
 		CommandType: command,
-		Callback:    callback,
+		OnTaskCreated: func(task interface{}) {
+			t, ok := task.(*TaskBase)
+			if ok {
+				onTaskCreated(t)
+			} else {
+				onTaskCreated(nil)
+			}
+		},
+		Callback: callback,
 	}
+}
+
+func (taskManager *TaskManagerBase) AddTask(command crcore.CommandType, callback func(interface{})) *TaskBase {
+	task := taskManager.createTask(command)
+	if task != nil {
+		taskManager.taskQueue <- TaskWithCallback{
+			Task:     task,
+			Callback: callback,
+		}
+	}
+	return task
+}
+
+func (taskManager *TaskManagerBase) TestNewTask2() *TaskBase {
+	task := taskManager.AddTask(crcore.CommandType{
+		Command: "bash",
+		Args:    []string{"-c", "echo xxx;sleep 1;echo ooo"},
+		Timeouts: crcore.TimeoutsType{
+			Proccess:    3000,
+			AfterKilled: 1500,
+		},
+	}, func(r interface{}) {
+
+	})
+	count := 0
+	for {
+		result := task.ResultLog()
+		if result != nil {
+			fmt.Println("result :", result)
+			break
+		}
+		count++
+		if count > 5 {
+			fmt.Println("count > 5 :", count)
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	fmt.Println("count :", count)
+	return task
 }
 
 func ResultLogsToJson(resultLogs []*crcore.ResultLog) ([]byte, error) {
