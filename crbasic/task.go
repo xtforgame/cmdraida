@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	// "path/filepath"
 	"github.com/xtforgame/cmdraida/crcore"
-	"syscall"
+	// "syscall"
 	"time"
 )
 
@@ -143,19 +143,19 @@ func (task *TaskBase) ExecOld(command string, args []string, stdout, stderr io.W
 	task.cmd.Start()
 	go func() {
 		err := task.cmd.Wait()
-		if exiterr, ok := err.(*exec.ExitError); ok {
-			// The program has exited with an exit code != 0
+		// if exiterr, ok := err.(*exec.ExitError); ok {
+		// 	// The program has exited with an exit code != 0
 
-			// This works on both Unix and Windows. Although package
-			// syscall is generally platfotaskManager dependent, WaitStatus is
-			// defined for both Unix and Windows and in both cases has
-			// an ExitStatus() method with the same signature.
-			// if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-			// 	fmt.Printf("Exit Status: %d\n", status.ExitStatus())
-			// }
-		} else {
-			// fmt.Printf("task.cmd.Wait: %v\n", err)
-		}
+		// 	// This works on both Unix and Windows. Although package
+		// 	// syscall is generally platfotaskManager dependent, WaitStatus is
+		// 	// defined for both Unix and Windows and in both cases has
+		// 	// an ExitStatus() method with the same signature.
+		// 	// if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+		// 	// 	fmt.Printf("Exit Status: %d\n", status.ExitStatus())
+		// 	// }
+		// } else {
+		// 	// fmt.Printf("task.cmd.Wait: %v\n", err)
+		// }
 		done <- err
 	}()
 
