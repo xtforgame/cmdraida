@@ -67,11 +67,11 @@ func (taskManager *TaskManagerBase) startWorker() {
 	taskManager.waitWorkerStop = make(chan bool)
 	stopped := false
 	go func() {
-		fmt.Println("worker started")
+		// fmt.Println("worker started")
 		for {
 			select {
 			case command := <-taskManager.cmdQueue:
-				fmt.Println("command :", command)
+				// fmt.Println("command :", command)
 				if command.IsTerminalCmd {
 					stopped = true
 				}
@@ -85,7 +85,7 @@ func (taskManager *TaskManagerBase) startWorker() {
 					return task
 				}, command.Callback, cancel)
 			case taskData := <-taskManager.taskQueue:
-				fmt.Println("taskData :", taskData)
+				// fmt.Println("taskData :", taskData)
 				if taskData.Task.command.IsTerminalCmd {
 					stopped = true
 				}
@@ -101,7 +101,7 @@ func (taskManager *TaskManagerBase) startWorker() {
 				break
 			}
 		}
-		fmt.Println("worker finished")
+		// fmt.Println("worker finished")
 		taskManager.waitWorkerStop <- true
 	}()
 }
@@ -114,9 +114,9 @@ func (taskManager *TaskManagerBase) finishWorker() {
 	}
 	select {
 	case <-time.After(time.Second * 5):
-		fmt.Println("worker finished by timeout")
+		// fmt.Println("worker finished by timeout")
 	case <-taskManager.waitWorkerStop:
-		fmt.Println("worker finished gracefully")
+		// fmt.Println("worker finished gracefully")
 	}
 	if taskManager.waitWorkerStop != nil {
 		close(taskManager.waitWorkerStop)
@@ -284,17 +284,17 @@ func (taskManager *TaskManagerBase) TestNewTask2() *TaskBase {
 	for {
 		result := task.ResultLog()
 		if result != nil {
-			fmt.Println("result :", result)
+			// fmt.Println("result :", result)
 			break
 		}
 		count++
 		if count > 5 {
-			fmt.Println("count > 5 :", count)
+			// fmt.Println("count > 5 :", count)
 			break
 		}
 		time.Sleep(1 * time.Second)
 	}
-	fmt.Println("count :", count)
+	// fmt.Println("count :", count)
 	return task
 }
 

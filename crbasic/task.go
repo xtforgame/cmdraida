@@ -2,7 +2,7 @@ package crbasic
 
 import (
 	"errors"
-	"fmt"
+	// "fmt"
 	"io"
 	"os/exec"
 	// "path/filepath"
@@ -150,11 +150,11 @@ func (task *TaskBase) ExecOld(command string, args []string, stdout, stderr io.W
 			// syscall is generally platfotaskManager dependent, WaitStatus is
 			// defined for both Unix and Windows and in both cases has
 			// an ExitStatus() method with the same signature.
-			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-				fmt.Printf("Exit Status: %d\n", status.ExitStatus())
-			}
+			// if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+			// 	fmt.Printf("Exit Status: %d\n", status.ExitStatus())
+			// }
 		} else {
-			fmt.Printf("task.cmd.Wait: %v\n", err)
+			// fmt.Printf("task.cmd.Wait: %v\n", err)
 		}
 		done <- err
 	}()
